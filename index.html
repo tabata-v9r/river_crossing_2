@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>川渡りパズル｜状態遷移とアルゴリズム学習アプリ</title>
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & Noto Sans JP -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@600;700;800&family=Noto+Sans+JP:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans JP', 'Inter', sans-serif;
+            background-color: #f1f5f9;
+            color: #1e293b;
+        }
+        .font-mono-code {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        /* 川の水面のアニメーション */
+        @keyframes waterFlow {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        .river-bg {
+            background: linear-gradient(180deg, #38bdf8 0%, #0284c7 50%, #0369a1 100%);
+            background-size: 200% 200%;
+            animation: waterFlow 8s ease infinite;
+        }
+        /* ボートの浮遊アニメーション */
+        @keyframes boatBob {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-4px); }
+        }
+        .boat-bob {
+            animation: boatBob 2.5s ease-in-out infinite;
+        }
+        /* キャラクター選択時のホバー・アクティブ効果 */
+        .char-card {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .char-card:hover:not(:disabled) {
+            transform: translateY(-2px);
+        }
+        /* カスタムスクロールバー */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- ヘッダー -->
+    <header class="bg-slate-900 text-white shadow-md sticky top-0 z-30">
+        <div class="max-w-4xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-3">
+                <span class="text-2xl bg-sky-500/20 p-1.5 rounded-xl border border-sky-400/30">🛶</span>
+                <div>
+                    <h1 class="text-base sm:text-lg font-bold tracking-tight flex items-center gap-2">
+                        川渡りパズル
+                        <span class="text-xs font-normal bg-sky-600 text-white px-2 py-0.5 rounded-full">情報科・状態遷移学習</span>
+                    </h1>
+                    <p class="text-xs text-slate-400 hidden sm:block">制約条件を守りながら nwcg から NWCG へ移動させよう</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="btnRulesModal" class="text-xs sm:text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-lg border border-slate-700 transition flex items-center gap-1.5 font-medium">
+                    <span>📖</span> ルール説明
+                </button>
+                <button onclick="resetGame()" class="text-xs sm:text-sm bg-rose-600/90 hover:bg-rose-500 text-white px-3 py-2 rounded-lg transition flex items-center gap-1.5 font-medium shadow-sm">
+                    <span>🔄</span> リセット
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- メインコンテンツ（中央1カラム・ワイドレイアウト） -->
+    <main class="flex-1 max-w-4xl w-full mx-auto px-3 sm:px-6 py-5 sm:py-8 flex flex-col gap-6">
+
+        <!-- 1. 現在の状態インジケーターカード -->
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">現在の状態文字列 (State)</div>
+                    <div class="flex items-baseline gap-3 sm:gap-4">
+                        <div id="stateDisplay" class="font-mono-code text-4xl sm:text-5xl font-extrabold tracking-widest bg-slate-100 px-5 py-2.5 rounded-xl border-2 border-slate-300 text-slate-800 shadow-inner">
+                            nwcg
+                        </div>
+                        <div class="text-xs sm:text-sm text-slate-600 space-y-1">
+                            <div><span class="font-mono-code font-bold text-amber-600">小文字</span> = 手前の岸(A)</div>
+                            <div><span class="font-mono-code font-bold text-emerald-600">大文字</span> = 対岸(B)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 手数カウンターと目標 -->
+                <div class="flex items-center gap-4 sm:gap-5 bg-slate-50 px-5 py-3 rounded-xl border border-slate-200">
+                    <div class="text-center">
+                        <div class="text-xs text-slate-500 font-medium">現在の手数</div>
+                        <div class="text-2xl sm:text-3xl font-extrabold text-sky-600 font-mono-code"><span id="stepCount">0</span><span class="text-xs font-normal text-slate-500 ml-0.5">手</span></div>
+                    </div>
+                    <div class="h-9 w-px bg-slate-300"></div>
+                    <div class="text-center">
+                        <div class="text-xs text-slate-500 font-medium">目標状態</div>
+                        <div class="text-lg sm:text-xl font-extrabold text-emerald-600 font-mono-code">NWCG</div>
+                        <div class="text-[11px] text-slate-400">最短 7手</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 状態文字の個別内訳バッジ -->
+            <div class="mt-5 pt-4 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center" id="charBreakdown">
+                <!-- JSで動的に描画 -->
+            </div>
+        </section>
+
+        <!-- 2. 川と岸のビジュアルシミュレーションボード -->
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            <div class="bg-slate-50 px-4 sm:px-6 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                <span class="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                    <span>🗺️</span> シミュレーション画面
+                </span>
+                <span id="turnInstruction" class="text-xs font-medium text-sky-700 bg-sky-100 px-3 py-1 rounded-full">
+                    人(n)と同じ岸の仲間を1つまで選んでボートに乗せよう
+                </span>
+            </div>
+
+            <!-- フィールド全体 (手前の岸A / 川 / 対岸B) -->
+            <div class="grid grid-cols-11 min-h-[320px] sm:min-h-[360px] relative select-none">
+
+                <!-- 手前の岸 (A): 小文字 -->
+                <div id="bankA" class="col-span-4 bg-gradient-to-b from-amber-50 to-amber-100/80 border-r-4 border-amber-300 p-3 sm:p-5 flex flex-col justify-between relative">
+                    <div>
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-xs sm:text-sm font-extrabold text-amber-900 bg-amber-200/80 px-2.5 py-1 rounded-lg">
+                                手前の岸 (A)
+                            </span>
+                            <span class="text-xs font-mono-code font-bold text-amber-700">小文字</span>
+                        </div>
+                        <div id="bankAContainer" class="flex flex-col gap-2.5 mt-3">
+                            <!-- 岸Aにいるキャラクターボタン -->
+                        </div>
+                    </div>
+                    <div class="text-xs text-amber-700/80 mt-3 text-center font-medium">
+                        スタート地点 (nwcg)
+                    </div>
+                </div>
+
+                <!-- 川エリア (中央): ボートの移動空間 -->
+                <div class="col-span-3 river-bg relative flex flex-col justify-between p-2 sm:p-3 overflow-hidden">
+                    <!-- 水面の装飾波線 -->
+                    <div class="text-sky-200/40 text-xs sm:text-sm text-center tracking-widest mt-1">〰️ 〰️ 〰️</div>
+
+                    <!-- ボート本体 -->
+                    <div id="boatWrapper" class="my-auto transition-all duration-500 ease-in-out flex flex-col items-center">
+                        <div class="boat-bob bg-amber-800 border-2 border-amber-950 text-white rounded-2xl p-2.5 sm:p-3 shadow-xl w-full max-w-[140px] flex flex-col items-center gap-2">
+                            <div class="text-[11px] sm:text-xs font-bold text-amber-200 tracking-wider flex items-center gap-1">
+                                <span>🚤</span> ボート (定員2)
+                            </div>
+                            <!-- ボート座席スロット -->
+                            <div class="grid grid-cols-2 gap-1.5 w-full bg-amber-950/60 p-1.5 rounded-xl min-h-[54px]">
+                                <!-- 操縦者（人）スロット -->
+                                <div id="boatSlotDriver" class="bg-amber-900/80 rounded-lg flex flex-col items-center justify-center p-1 border border-amber-700/50">
+                                    <span class="text-xl leading-none">🧑</span>
+                                    <span id="boatDriverCode" class="text-xs font-mono-code font-bold text-amber-200 mt-0.5">n</span>
+                                </div>
+                                <!-- 同乗者スロット -->
+                                <div id="boatSlotPassenger" onclick="unloadPassenger()" title="クリックで岸に戻す" class="bg-amber-900/40 rounded-lg flex flex-col items-center justify-center p-1 border border-dashed border-amber-600/60 cursor-pointer hover:bg-amber-800/60 transition">
+                                    <span class="text-xs text-amber-400/70">空席</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- ボートの現在岸インジケーター -->
+                        <div id="boatSideLabel" class="mt-2 text-xs font-bold text-white bg-slate-900/60 px-2.5 py-1 rounded-full backdrop-blur-sm text-center">
+                            ◀ 岸Aに停泊中
+                        </div>
+                    </div>
+
+                    <div class="text-sky-200/40 text-xs sm:text-sm text-center tracking-widest mb-1">〰️ 〰️ 〰️</div>
+                </div>
+
+                <!-- 対岸 (B): 大文字 -->
+                <div id="bankB" class="col-span-4 bg-gradient-to-b from-emerald-50 to-emerald-100/80 border-l-4 border-emerald-300 p-3 sm:p-5 flex flex-col justify-between relative">
+                    <div>
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-xs sm:text-sm font-extrabold text-emerald-900 bg-emerald-200/80 px-2.5 py-1 rounded-lg">
+                                対岸 (B)
+                            </span>
+                            <span class="text-xs font-mono-code font-bold text-emerald-700">大文字</span>
+                        </div>
+                        <div id="bankBContainer" class="flex flex-col gap-2.5 mt-3">
+                            <!-- 岸Bにいるキャラクターボタン -->
+                        </div>
+                    </div>
+                    <div class="text-xs text-emerald-700/80 mt-3 text-center font-medium">
+                        ゴール地点 (NWCG)
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- フィードバックメッセージバナー（ゲームオーバー・クリア表示用） -->
+            <div id="feedbackBanner" class="hidden border-t px-5 py-4 transition-all">
+                <!-- JSで動的に内容挿入 -->
+            </div>
+
+            <!-- 操作コントロールバー -->
+            <div class="bg-slate-50 p-4 sm:px-6 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-2">
+                    <button id="btnUndo" onclick="undoMove()" disabled class="px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1.5 shadow-sm">
+                        <span>↩️</span> 1手戻る
+                    </button>
+                    <button id="btnReset" onclick="resetGame()" class="px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm bg-white text-rose-600 border border-rose-200 hover:bg-rose-50 transition flex items-center gap-1.5 shadow-sm">
+                        <span>🔄</span> 最初からやり直す
+                    </button>
+                </div>
+
+                <button id="btnCross" onclick="crossRiver()" class="flex-1 sm:flex-initial px-7 py-3 rounded-xl font-extrabold text-sm sm:text-base bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-md shadow-sky-600/20 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-2">
+                    <span id="btnCrossText">対岸(B)へ渡る</span>
+                    <span id="btnCrossIcon">➡️</span>
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ルール・記号説明モーダル -->
+    <div id="rulesModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <h3 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">
+                    <span>📖</span> パズルのルールと状態表現
+                </h3>
+                <button onclick="closeRulesModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold px-2">✕</button>
+            </div>
+            <div class="py-4 space-y-4 text-sm text-slate-700 leading-relaxed">
+                <div>
+                    <h4 class="font-bold text-slate-900 mb-1">1. 状態の文字列表現（モデル化）</h4>
+                    <p>4つの登場キャラクターの位置を4文字のアルファベットで表します。</p>
+                    <ul class="mt-1.5 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1 text-xs sm:text-sm font-mono-code">
+                        <li><strong>n / N</strong> : 人 (Navigator) 🧑</li>
+                        <li><strong>w / W</strong> : 狼 (Wolf) 🐺</li>
+                        <li><strong>c / C</strong> : キャベツ (Cabbage) 🥬</li>
+                        <li><strong>g / G</strong> : ヤギ (Goat) 🐐</li>
+                    </ul>
+                    <p class="mt-1.5 text-xs text-slate-600">
+                        ※ <strong>小文字</strong>は手前の岸(A)、<strong>大文字</strong>は対岸(B)にいることを表します。初期状態は <code class="font-mono-code font-bold">nwcg</code>、目標状態は <code class="font-mono-code font-bold">NWCG</code> です。
+                    </p>
+                </div>
+                <div>
+                    <h4 class="font-bold text-slate-900 mb-1">2. ボートの移動ルール</h4>
+                    <ul class="list-disc pl-5 space-y-1">
+                        <li>ボートを操縦できるのは<strong>人(n/N)</strong>だけです。</li>
+                        <li>ボートには人の他に<strong>最大1つまで</strong>（狼・キャベツ・ヤギのいずれか）を乗せることができます。人だけで移動することも可能です。</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-bold text-slate-900 mb-1">3. 制約条件（禁止状態）</h4>
+                    <p>人がいない岸に以下の組み合わせが残ると失敗になります。</p>
+                    <ul class="list-disc pl-5 space-y-1 text-rose-700 font-medium">
+                        <li>狼とヤギが揃う（例：<code class="font-mono-code">Nwcg</code>, <code class="font-mono-code">nWcG</code> など）</li>
+                        <li>ヤギとキャベツが揃う（例：<code class="font-mono-code">NwcG</code>, <code class="font-mono-code">nwCg</code> など）</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="pt-3 border-t border-slate-200 flex justify-end">
+                <button onclick="closeRulesModal()" class="bg-sky-600 hover:bg-sky-500 text-white font-bold px-5 py-2 rounded-xl transition">
+                    理解した！
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * 川渡りパズル 学習用Webアプリケーション
+         * 状態表現: { n: boolean, w: boolean, c: boolean, g: boolean }
+         * false = 手前の岸(A) [小文字], true = 対岸(B) [大文字]
+         */
+
+        // キャラクター定義マスター
+        const CHARACTERS = [
+            { key: 'n', name: '人', emoji: '🧑', lower: 'n', upper: 'N', role: '操縦者' },
+            { key: 'w', name: '狼', emoji: '🐺', lower: 'w', upper: 'W', role: '荷物' },
+            { key: 'c', name: 'キャベツ', emoji: '🥬', lower: 'c', upper: 'C', role: '荷物' },
+            { key: 'g', name: 'ヤギ', emoji: '🐐', lower: 'g', upper: 'G', role: '荷物' }
+        ];
+
+        // アプリケーション状態
+        let currentState = { n: false, w: false, c: false, g: false }; // 初期状態: nwcg
+        let selectedPassenger = null; // 'w' | 'c' | 'g' | null (ボートに乗せている同乗者)
+        let history = []; // Undo用状態履歴 [{ state, stateStr }]
+        let gameStatus = 'playing'; // 'playing' | 'gameover' | 'cleared'
+
+        /**
+         * 状態オブジェクトから4文字の状態文字列（例: "nwcg", "NwCg"）を生成
+         */
+        function getStateString(st) {
+            return (st.n ? 'N' : 'n') +
+                   (st.w ? 'W' : 'w') +
+                   (st.c ? 'C' : 'c') +
+                   (st.g ? 'G' : 'g');
+        }
+
+        /**
+         * 制約条件のチェック関数
+         * @returns {Object} { valid: boolean, reason: string }
+         */
+        function validateState(st) {
+            // 人がいない側の岸で「狼とヤギ」が一緒か？
+            if (st.w === st.g && st.n !== st.w) {
+                const bankName = st.w ? '対岸(B)' : '手前の岸(A)';
+                return {
+                    valid: false,
+                    reason: `人がいない${bankName}に「狼(${st.w ? 'W' : 'w'})」と「ヤギ(${st.g ? 'G' : 'g'})」が残ったため、ヤギが狼に食べられてしまいました！`
+                };
+            }
+            // 人がいない側の岸で「ヤギとキャベツ」が一緒か？
+            if (st.g === st.c && st.n !== st.g) {
+                const bankName = st.g ? '対岸(B)' : '手前の岸(A)';
+                return {
+                    valid: false,
+                    reason: `人がいない${bankName}に「ヤギ(${st.g ? 'G' : 'g'})」と「キャベツ(${st.c ? 'C' : 'c'})」が残ったため、キャベツがヤギに食べられてしまいました！`
+                };
+            }
+            return { valid: true, reason: '' };
+        }
+
+        /**
+         * ゲームの初期化・リセット
+         */
+        function resetGame() {
+            currentState = { n: false, w: false, c: false, g: false };
+            selectedPassenger = null;
+            gameStatus = 'playing';
+            history = [{
+                state: { ...currentState },
+                stateStr: getStateString(currentState)
+            }];
+            hideFeedback();
+            renderAll();
+        }
+
+        /**
+         * 同乗者の選択・解除（岸にいるキャラクターをクリックした時）
+         */
+        function togglePassenger(key) {
+            if (gameStatus !== 'playing') return;
+            if (key === 'n') return; // 人は常に操縦者として乗船
+
+            // 人と同じ岸にいるか確認
+            if (currentState[key] !== currentState.n) return;
+
+            if (selectedPassenger === key) {
+                selectedPassenger = null; // すでに選択済みなら降ろす
+            } else {
+                selectedPassenger = key; // 新しく乗せる（定員1名なので上書き）
+            }
+            renderBoard();
+        }
+
+        /**
+         * ボートの同乗者スロットをクリックして岸へ降ろす
+         */
+        function unloadPassenger() {
+            if (gameStatus !== 'playing') return;
+            if (selectedPassenger) {
+                selectedPassenger = null;
+                renderBoard();
+            }
+        }
+
+        /**
+         * 「対岸へ渡る」実行処理
+         */
+        function crossRiver() {
+            if (gameStatus !== 'playing') return;
+
+            // 次の状態を計算（人と、選ばれた同乗者の位置を反転）
+            const nextState = { ...currentState };
+            nextState.n = !nextState.n;
+            if (selectedPassenger) {
+                nextState[selectedPassenger] = !nextState[selectedPassenger];
+            }
+
+            // 状態更新 & 同乗者リセット
+            currentState = nextState;
+            selectedPassenger = null;
+
+            const stateStr = getStateString(currentState);
+            const validation = validateState(currentState);
+
+            // Undo用に履歴へ追加
+            history.push({
+                state: { ...currentState },
+                stateStr: stateStr
+            });
+
+            // 勝敗・制約違反判定
+            if (!validation.valid) {
+                gameStatus = 'gameover';
+                showFeedback(
+                    'error',
+                    `❌ ゲームオーバー（状態：${stateStr}）`,
+                    validation.reason,
+                    '🔄 最初からやり直す'
+                );
+            } else if (stateStr === 'NWCG') {
+                gameStatus = 'cleared';
+                const steps = history.length - 1;
+                const evalMsg = steps === 7
+                    ? '素晴らしい！理論上の最短手数（7手）で見事にクリアしました！🎉'
+                    : `クリアおめでとうございます！（今回の手数：${steps}手 ／ 最短手数は 7手 です）`;
+                showFeedback(
+                    'success',
+                    `🎉 クリアおめでとう！（状態：NWCG に到達）`,
+                    evalMsg,
+                    '✨ もう一回遊ぶ'
+                );
+            } else {
+                hideFeedback();
+            }
+
+            renderAll();
+        }
+
+        /**
+         * 1手戻る (Undo)
+         */
+        function undoMove() {
+            if (history.length <= 1) return;
+
+            history.pop();
+            const prevEntry = history[history.length - 1];
+            currentState = { ...prevEntry.state };
+            selectedPassenger = null;
+            gameStatus = 'playing';
+            hideFeedback();
+            renderAll();
+        }
+
+        /**
+         * 画面全体の再描画
+         */
+        function renderAll() {
+            renderHeaderStats();
+            renderBoard();
+        }
+
+        /**
+         * 上部ステータス（状態文字列・手数・文字内訳）の描画
+         */
+        function renderHeaderStats() {
+            const stateStr = getStateString(currentState);
+            const stateDisplay = document.getElementById('stateDisplay');
+            stateDisplay.textContent = stateStr;
+
+            // 状態に応じた色分け
+            stateDisplay.className = 'font-mono-code text-4xl sm:text-5xl font-extrabold tracking-widest px-4 py-2 rounded-xl border-2 shadow-inner transition-colors ';
+            if (gameStatus === 'gameover') {
+                stateDisplay.className += 'bg-rose-50 border-rose-400 text-rose-700';
+            } else if (gameStatus === 'cleared') {
+                stateDisplay.className += 'bg-emerald-50 border-emerald-400 text-emerald-700';
+            } else {
+                stateDisplay.className += 'bg-slate-100 border-slate-300 text-slate-800';
+            }
+
+            // 手数
+            document.getElementById('stepCount').textContent = history.length - 1;
+
+            // 4文字の個別内訳カード
+            const breakdownEl = document.getElementById('charBreakdown');
+            breakdownEl.innerHTML = CHARACTERS.map(ch => {
+                const isBankB = currentState[ch.key];
+                const charCode = isBankB ? ch.upper : ch.lower;
+                const badgeClass = isBankB
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-amber-50 border-amber-200 text-amber-800';
+                const bankText = isBankB ? '岸B (対岸)' : '岸A (手前)';
+                return `
+                    <div class="rounded-xl border p-1.5 sm:p-2 ${badgeClass}">
+                        <div class="text-base sm:text-lg leading-tight">${ch.emoji} <span class="font-mono-code font-extrabold">${charCode}</span></div>
+                        <div class="text-[10px] sm:text-xs font-medium opacity-80 mt-0.5">${ch.name}: ${bankText}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        /**
+         * シミュレーションボード（岸A・ボート・岸B・操作ボタン）の描画
+         */
+        function renderBoard() {
+            const bankAContainer = document.getElementById('bankAContainer');
+            const bankBContainer = document.getElementById('bankBContainer');
+            bankAContainer.innerHTML = '';
+            bankBContainer.innerHTML = '';
+
+            const boatOnB = currentState.n; // trueなら岸B側にボートがある
+
+            CHARACTERS.forEach(ch => {
+                const isOnB = currentState[ch.key];
+                const isSameSideAsBoat = (isOnB === boatOnB);
+                const isInBoat = (ch.key === 'n') || (selectedPassenger === ch.key);
+
+                // ボタン要素生成
+                const btn = document.createElement('button');
+                const charCode = isOnB ? ch.upper : ch.lower;
+
+                if (ch.key === 'n') {
+                    // 人は常にボートに乗っている扱い（表示バッジとして配置）
+                    btn.disabled = true;
+                    btn.className = 'w-full text-left px-2.5 py-2 rounded-xl border border-sky-300 bg-sky-100/80 text-sky-900 flex items-center justify-between opacity-75 cursor-default';
+                    btn.innerHTML = `
+                        <div class="flex items-center gap-2">
+                            <span class="text-xl sm:text-2xl">${ch.emoji}</span>
+                            <div>
+                                <div class="text-xs sm:text-sm font-bold leading-tight">${ch.name} <span class="font-mono-code">(${charCode})</span></div>
+                                <div class="text-[10px] text-sky-700 font-semibold">🚤 ボート操縦中</div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // 狼・キャベツ・ヤギ
+                    const canInteract = isSameSideAsBoat && gameStatus === 'playing';
+                    btn.disabled = !canInteract;
+                    btn.onclick = () => togglePassenger(ch.key);
+
+                    if (isInBoat) {
+                        btn.className = 'char-card w-full text-left px-2.5 py-2 rounded-xl border-2 border-sky-500 bg-sky-50 text-sky-950 shadow-sm flex items-center justify-between';
+                        btn.innerHTML = `
+                            <div class="flex items-center gap-2">
+                                <span class="text-xl sm:text-2xl">${ch.emoji}</span>
+                                <div>
+                                    <div class="text-xs sm:text-sm font-bold leading-tight">${ch.name} <span class="font-mono-code">(${charCode})</span></div>
+                                    <div class="text-[10px] font-bold text-sky-600">🚤 乗船中 (タップで降ろす)</div>
+                                </div>
+                            </div>
+                        `;
+                    } else if (canInteract) {
+                        btn.className = 'char-card w-full text-left px-2.5 py-2 rounded-xl border border-slate-300 bg-white hover:border-sky-400 hover:bg-sky-50/50 text-slate-800 shadow-sm flex items-center justify-between cursor-pointer';
+                        btn.innerHTML = `
+                            <div class="flex items-center gap-2">
+                                <span class="text-xl sm:text-2xl">${ch.emoji}</span>
+                                <div>
+                                    <div class="text-xs sm:text-sm font-bold leading-tight">${ch.name} <span class="font-mono-code">(${charCode})</span></div>
+                                    <div class="text-[10px] text-slate-500">タップして乗せる</div>
+                                </div>
+                            </div>
+                            <span class="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">+乗船</span>
+                        `;
+                    } else {
+                        // 対岸にいるため操作不可
+                        btn.className = 'w-full text-left px-2.5 py-2 rounded-xl border border-slate-200/80 bg-white/60 text-slate-500 flex items-center justify-between opacity-75 cursor-not-allowed';
+                        btn.innerHTML = `
+                            <div class="flex items-center gap-2">
+                                <span class="text-xl sm:text-2xl grayscale-[30%]">${ch.emoji}</span>
+                                <div>
+                                    <div class="text-xs sm:text-sm font-bold leading-tight">${ch.name} <span class="font-mono-code">(${charCode})</span></div>
+                                    <div class="text-[10px] text-slate-400">待機中</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+
+                if (isOnB) {
+                    bankBContainer.appendChild(btn);
+                } else {
+                    bankAContainer.appendChild(btn);
+                }
+            });
+
+            // ボート内のスロット描画
+            document.getElementById('boatDriverCode').textContent = boatOnB ? 'N' : 'n';
+            const passengerSlot = document.getElementById('boatSlotPassenger');
+            if (selectedPassenger) {
+                const pObj = CHARACTERS.find(c => c.key === selectedPassenger);
+                const pCode = boatOnB ? pObj.upper : pObj.lower;
+                passengerSlot.className = 'bg-sky-600 rounded-lg flex flex-col items-center justify-center p-1 border border-sky-300 cursor-pointer hover:bg-sky-500 transition shadow-inner';
+                passengerSlot.innerHTML = `
+                    <span class="text-lg leading-none">${pObj.emoji}</span>
+                    <span class="text-[10px] font-mono-code font-bold text-white">${pCode}</span>
+                `;
+            } else {
+                passengerSlot.className = 'bg-amber-900/40 rounded-lg flex flex-col items-center justify-center p-1 border border-dashed border-amber-500/50';
+                passengerSlot.innerHTML = `<span class="text-[10px] text-amber-300/70 font-medium">空席</span>`;
+            }
+
+            // ボートの停泊ラベルと位置ニュアンス
+            const boatSideLabel = document.getElementById('boatSideLabel');
+            const btnCross = document.getElementById('btnCross');
+            const btnCrossText = document.getElementById('btnCrossText');
+            const btnCrossIcon = document.getElementById('btnCrossIcon');
+            const turnInstruction = document.getElementById('turnInstruction');
+
+            if (!boatOnB) {
+                boatSideLabel.textContent = '◀ 岸A(手前)に停泊中';
+                btnCrossText.textContent = '対岸(B)へ渡る';
+                btnCrossIcon.textContent = '➡️';
+                turnInstruction.textContent = '岸Aにいる仲間を1つまで選んで対岸(B)へ渡ろう';
+            } else {
+                boatSideLabel.textContent = '岸B(対岸)に停泊中 ▶';
+                btnCrossText.textContent = '手前の岸(A)へ戻る';
+                btnCrossIcon.textContent = '⬅️';
+                turnInstruction.textContent = '岸Bにいる仲間を1つまで選んで岸(A)へ戻ろう';
+            }
+
+            // ボタン活性制御
+            btnCross.disabled = (gameStatus !== 'playing');
+            document.getElementById('btnUndo').disabled = (history.length <= 1);
+        }
+
+        /**
+         * フィードバックバナー表示（やり直し・もう一回遊ぶボタン付き）
+         */
+        function showFeedback(type, title, message, actionBtnLabel) {
+            const banner = document.getElementById('feedbackBanner');
+            banner.classList.remove('hidden', 'bg-rose-50', 'border-rose-200', 'text-rose-900', 'bg-emerald-50', 'border-emerald-200', 'text-emerald-900');
+
+            let btnStyle = '';
+            if (type === 'error') {
+                banner.classList.add('bg-rose-50', 'border-rose-200', 'text-rose-900');
+                btnStyle = 'bg-rose-600 hover:bg-rose-500 text-white';
+            } else {
+                banner.classList.add('bg-emerald-50', 'border-emerald-200', 'text-emerald-900');
+                btnStyle = 'bg-emerald-600 hover:bg-emerald-500 text-white';
+            }
+
+            banner.innerHTML = `
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                        <div class="font-extrabold text-sm sm:text-base mb-1">${title}</div>
+                        <p class="text-xs sm:text-sm leading-relaxed opacity-90">${message}</p>
+                    </div>
+                    <button onclick="resetGame()" class="shrink-0 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-sm transition ${btnStyle}">
+                        ${actionBtnLabel}
+                    </button>
+                </div>
+            `;
+        }
+
+        function hideFeedback() {
+            const banner = document.getElementById('feedbackBanner');
+            banner.classList.add('hidden');
+        }
+
+        // モーダル制御
+        const rulesModal = document.getElementById('rulesModal');
+        document.getElementById('btnRulesModal').addEventListener('click', () => {
+            rulesModal.classList.remove('hidden');
+            rulesModal.classList.add('flex');
+        });
+        function closeRulesModal() {
+            rulesModal.classList.add('hidden');
+            rulesModal.classList.remove('flex');
+        }
+        rulesModal.addEventListener('click', (e) => {
+            if (e.target === rulesModal) closeRulesModal();
+        });
+
+        // 初期化実行
+        window.onload = function() {
+            resetGame();
+        };
+    </script>
+</body>
+</html>
